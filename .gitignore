@@ -1,0 +1,8 @@
+build/
+data/
+results/
+plots/
+__pycache__/
+.pytest_cache/
+.venv/
+.codex
