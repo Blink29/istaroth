@@ -49,8 +49,8 @@ def save_runtime_plot(df: pd.DataFrame, out_dir: Path, time_col: str, title_suff
 def save_speedup_plot(df: pd.DataFrame, out_dir: Path, time_col: str) -> None:
     project = df[~df["tool"].isin(["find", "grep"])].copy()
     baselines = {
-        "pfind": df[df["tool"] == "find"][time_col].mean(),
-        "pgrep": df[df["tool"] == "grep"][time_col].mean(),
+        "pfind": df[df["tool"] == "pfind_serial"][time_col].mean(),
+        "pgrep": df[df["tool"] == "pgrep_serial"][time_col].mean(),
     }
     if any(pd.isna(value) for value in baselines.values()):
         return
@@ -63,7 +63,7 @@ def save_speedup_plot(df: pd.DataFrame, out_dir: Path, time_col: str) -> None:
         label = tool_df.apply(lambda row: f"{int(row.mpi_ranks)}x{int(row.omp_threads)}", axis=1)
         plt.plot(label, tool_df["speedup"], marker="o", label=tool)
     plt.axhline(1.0, color="black", linewidth=0.8, linestyle="--")
-    plt.ylabel("Speedup vs serial utility")
+    plt.ylabel("Speedup vs project serial")
     plt.xlabel("MPI ranks x OpenMP threads")
     plt.xticks(rotation=35, ha="right")
     plt.legend()
@@ -77,14 +77,17 @@ def save_throughput_plot(df: pd.DataFrame, out_dir: Path, time_col: str) -> None
     if pgrep.empty or "bytes_read" not in pgrep:
         return
     pgrep["mb_per_second"] = pd.to_numeric(pgrep["bytes_read"], errors="coerce") / 1_000_000 / pgrep[time_col]
-    grouped = pgrep.groupby(["mpi_ranks", "omp_threads"], as_index=False)["mb_per_second"].mean()
+    grouped = pgrep.groupby(["tool", "mpi_ranks", "omp_threads"], as_index=False)["mb_per_second"].mean()
+    grouped = grouped.sort_values(["mpi_ranks", "omp_threads", "tool"])
 
     plt.figure(figsize=(9, 5))
-    labels = grouped.apply(lambda row: f"{int(row.mpi_ranks)}x{int(row.omp_threads)}", axis=1)
-    plt.bar(labels, grouped["mb_per_second"])
+    for tool, tool_df in grouped.groupby("tool"):
+        labels = tool_df.apply(lambda row: f"{int(row.mpi_ranks)}x{int(row.omp_threads)}", axis=1)
+        plt.plot(labels, tool_df["mb_per_second"], marker="o", label=tool)
     plt.ylabel("Mean pgrep throughput (MB/s)")
     plt.xlabel("MPI ranks x OpenMP threads")
     plt.xticks(rotation=35, ha="right")
+    plt.legend()
     plt.tight_layout()
     plt.savefig(out_dir / "pgrep_throughput.png", dpi=180)
     plt.close()

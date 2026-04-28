@@ -15,15 +15,23 @@ def random_word(rng: random.Random, length: int = 8) -> str:
 
 def make_file(path: Path, size_kib: int, needle: str, include_needle: bool, rng: random.Random) -> None:
     target_bytes = size_kib * 1024
-    words = []
+    alphabet = string.ascii_lowercase + "     \n"
+    needle_at = rng.randrange(max(1, target_bytes - len(needle))) if include_needle else -1
+    chunk_size = 256 * 1024
     written = 0
-    while written < target_bytes:
-        word = random_word(rng, rng.randint(4, 12))
-        words.append(word)
-        written += len(word) + 1
-    if include_needle and words:
-        words[rng.randrange(len(words))] = needle
-    path.write_text(" ".join(words) + "\n", encoding="utf-8")
+
+    with path.open("w", encoding="utf-8") as handle:
+        while written < target_bytes:
+            remaining = target_bytes - written
+            current_size = min(chunk_size, remaining)
+            chunk = "".join(rng.choices(alphabet, k=current_size))
+
+            if include_needle and written <= needle_at < written + current_size:
+                offset = needle_at - written
+                chunk = chunk[:offset] + needle + chunk[offset + len(needle):]
+
+            handle.write(chunk)
+            written += current_size
 
 
 def populate_dir(
@@ -31,7 +39,8 @@ def populate_dir(
     depth: int,
     fanout: int,
     files_per_dir: int,
-    file_size_kib: int,
+    file_size_kib_min: int,
+    file_size_kib_max: int,
     target_name: str,
     needle: str,
     target_every: int,
@@ -45,7 +54,8 @@ def populate_dir(
         counter[0] += 1
         is_target = current % target_every == 0
         stem = f"{target_name}_{current:06d}" if is_target else f"file_{current:06d}"
-        make_file(root / f"{stem}.txt", file_size_kib, needle, is_target, rng)
+        size_kib = rng.randint(file_size_kib_min, file_size_kib_max)
+        make_file(root / f"{stem}.txt", size_kib, needle, is_target, rng)
 
     if depth == 0:
         return
@@ -59,7 +69,8 @@ def populate_dir(
             depth - 1,
             fanout,
             files_per_dir,
-            file_size_kib,
+            file_size_kib_min,
+            file_size_kib_max,
             target_name,
             needle,
             target_every,
@@ -75,6 +86,8 @@ def main() -> int:
     parser.add_argument("--fanout", type=int, default=4)
     parser.add_argument("--files-per-dir", type=int, default=8)
     parser.add_argument("--file-size-kib", type=int, default=16)
+    parser.add_argument("--file-size-kib-min", type=int)
+    parser.add_argument("--file-size-kib-max", type=int)
     parser.add_argument("--target-name", default="target")
     parser.add_argument("--needle", default="distributed_needle")
     parser.add_argument("--target-every", type=int, default=11)
@@ -87,13 +100,21 @@ def main() -> int:
             raise SystemExit(f"{args.root} already exists; pass --force to replace it")
         shutil.rmtree(args.root)
 
+    file_size_kib_min = args.file_size_kib_min if args.file_size_kib_min is not None else args.file_size_kib
+    file_size_kib_max = args.file_size_kib_max if args.file_size_kib_max is not None else args.file_size_kib
+    if file_size_kib_min <= 0 or file_size_kib_max <= 0:
+        raise SystemExit("file sizes must be positive")
+    if file_size_kib_min > file_size_kib_max:
+        raise SystemExit("--file-size-kib-min must be <= --file-size-kib-max")
+
     rng = random.Random(args.seed)
     populate_dir(
         args.root,
         args.depth,
         args.fanout,
         args.files_per_dir,
-        args.file_size_kib,
+        file_size_kib_min,
+        file_size_kib_max,
         args.target_name,
         args.needle,
         args.target_every,

@@ -4,7 +4,12 @@
 #include <omp.h>
 #endif
 
+#include <dirent.h>
+#include <sys/stat.h>
+
 #include <deque>
+#include <cerrno>
+#include <cstring>
 #include <stdexcept>
 
 using namespace std;
@@ -23,6 +28,47 @@ bool type_matches(const Entry &entry, EntryType type) {
     return entry.is_directory;
 }
 
+bool load_entry(const fs::path &path, Entry &entry, Metrics &metrics) {
+    struct stat st {};
+    if (lstat(path.c_str(), &st) != 0) {
+        ++metrics.errors;
+        return false;
+    }
+
+    const bool is_dir = S_ISDIR(st.st_mode);
+    entry = Entry{path, is_dir, is_dir ? 0 : static_cast<uintmax_t>(st.st_size)};
+    if (is_dir) {
+        ++metrics.directories;
+    } else {
+        ++metrics.files;
+    }
+    return true;
+}
+
+void push_children(const fs::path &path,
+                   int depth,
+                   deque<pair<fs::path, int>> &pending,
+                   Metrics &metrics) {
+    DIR *dir = opendir(path.c_str());
+    if (dir == nullptr) {
+        ++metrics.errors;
+        return;
+    }
+
+    errno = 0;
+    while (dirent *child = readdir(dir)) {
+        const char *name = child->d_name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+            continue;
+        }
+        pending.push_back({path / name, depth});
+    }
+    if (errno != 0) {
+        ++metrics.errors;
+    }
+    closedir(dir);
+}
+
 void traverse_one(const WorkItem &item,
                   const TraverseOptions &options,
                   const function<bool(const Entry &)> &predicate,
@@ -39,22 +85,9 @@ void traverse_one(const WorkItem &item,
             pending.pop_back();
         }
 
-        error_code ec;
-        const bool is_dir = fs::is_directory(current.first, ec);
-        if (ec) {
-            ++metrics.errors;
+        Entry entry;
+        if (!load_entry(current.first, entry, metrics)) {
             continue;
-        }
-
-        Entry entry{current.first, is_dir, 0};
-        if (is_dir) {
-            ++metrics.directories;
-        } else {
-            ++metrics.files;
-            const auto size = fs::file_size(current.first, ec);
-            if (!ec) {
-                entry.size = size;
-            }
         }
 
         if (type_matches(entry, options.type) && predicate(entry)) {
@@ -62,21 +95,16 @@ void traverse_one(const WorkItem &item,
             ++metrics.matches;
         }
 
-        if (!is_dir || current.second == 0) {
+        if (!entry.is_directory || current.second == 0) {
             continue;
         }
 
         const int child_depth = current.second < 0 ? -1 : current.second - 1;
-        for (const auto &child : fs::directory_iterator(current.first, fs::directory_options::skip_permission_denied, ec)) {
-            pending.push_back({child.path(), child_depth});
-        }
-        if (ec) {
-            ++metrics.errors;
-        }
+        push_children(current.first, child_depth, pending, metrics);
     }
 }
 
-} 
+}
 
 TraversalMode parse_traversal_mode(const string &value) {
     if (value == "bfs") {

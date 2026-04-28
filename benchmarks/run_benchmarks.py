@@ -32,6 +32,10 @@ def run_command(cmd: list[str]) -> tuple[float, str]:
     return time.perf_counter() - start, completed.stdout
 
 
+def warmup_command(cmd: list[str]) -> None:
+    subprocess.run(cmd, text=True, capture_output=True, check=True)
+
+
 def append_rows(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     exists = path.exists()
@@ -132,6 +136,7 @@ def main() -> int:
     parser.add_argument("--ranks", type=int, nargs="+", default=[1, 2])
     parser.add_argument("--threads", type=int, nargs="+", default=[1, 2, 4])
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--overwrite", action="store_true", help="Replace the output CSV before writing")
     parser.add_argument(
         "--modes",
         nargs="+",
@@ -151,6 +156,19 @@ def main() -> int:
         for executable in executables[mode]:
             if not executable.exists():
                 raise SystemExit(f"build first: missing {executable}")
+
+    if args.overwrite:
+        args.output.unlink(missing_ok=True)
+
+    if args.repeats > 0:
+        if "gnu" in args.modes:
+            warmup_command(["find", str(args.dataset), "-name", f"*{args.query}*"])
+            warmup_command(["grep", "-RIl", "--", args.pattern, str(args.dataset)])
+
+        if "serial" in args.modes:
+            pfind_serial, pgrep_serial = executables["serial"]
+            project_tool(pfind_serial, args.dataset, "--name", args.query, 1, 1, -1, False)
+            project_tool(pgrep_serial, args.dataset, "--pattern", args.pattern, 1, 1, -1, False)
 
     for repeat in range(args.repeats):
         rows: list[dict[str, str]] = []

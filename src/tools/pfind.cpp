@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
 
         vector<pou::WorkItem> all_work;
         if (rank == 0) {
-            all_work = pou::build_seed_work(roots, ranks * max(4, effective_threads), max_depth);
+            all_work = pou::build_seed_work(roots, ranks * max(32, effective_threads * 16), max_depth);
         }
         const auto local_work = pou::distribute_work(all_work, 0);
 

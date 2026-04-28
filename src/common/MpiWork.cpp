@@ -4,7 +4,12 @@
 #include <mpi.h>
 #endif
 
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <deque>
+#include <cstring>
 #include <sstream>
 #include <stdexcept>
 
@@ -40,11 +45,33 @@ vector<WorkItem> deserialize_work(const string &text) {
 }
 
 bool expandable(const WorkItem &item) {
-    error_code ec;
-    return item.max_depth != 0 && fs::is_directory(item.path, ec);
+    if (item.max_depth == 0) {
+        return false;
+    }
+
+    struct stat st {};
+    return lstat(item.path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-} 
+vector<WorkItem> list_children(const fs::path &path, int child_depth) {
+    vector<WorkItem> children;
+    DIR *dir = opendir(path.c_str());
+    if (dir == nullptr) {
+        return children;
+    }
+
+    while (dirent *child = readdir(dir)) {
+        const char *name = child->d_name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+            continue;
+        }
+        children.push_back({path / name, child_depth});
+    }
+    closedir(dir);
+    return children;
+}
+
+}
 
 vector<WorkItem> build_seed_work(const vector<fs::path> &roots,
                                       int target_items,
@@ -54,7 +81,11 @@ vector<WorkItem> build_seed_work(const vector<fs::path> &roots,
         frontier.push_back({root, max_depth});
     }
     if (frontier.empty()) {
-        frontier.push_back({fs::current_path(), max_depth});
+        char cwd[4096];
+        if (getcwd(cwd, sizeof(cwd)) == nullptr) {
+            throw runtime_error("failed to get current working directory");
+        }
+        frontier.push_back({fs::path(cwd), max_depth});
     }
 
     while (static_cast<int>(frontier.size()) < target_items) {
@@ -64,13 +95,10 @@ vector<WorkItem> build_seed_work(const vector<fs::path> &roots,
             WorkItem item = frontier.front();
             frontier.pop_front();
             if (!expanded_one && expandable(item)) {
-                vector<WorkItem> children;
-                error_code ec;
                 const auto child_depth = item.max_depth < 0 ? -1 : item.max_depth - 1;
-                for (const auto &entry : fs::directory_iterator(item.path, fs::directory_options::skip_permission_denied, ec)) {
-                    children.push_back({entry.path(), child_depth});
-                }
+                const auto children = list_children(item.path, child_depth);
                 if (!children.empty()) {
+                    frontier.push_back({item.path, 0});
                     for (const auto &child : children) {
                         frontier.push_back(child);
                     }
