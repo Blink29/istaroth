@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Compare pfind/pgrep variants against GNU find/grep on one dataset."""
 
 from __future__ import annotations

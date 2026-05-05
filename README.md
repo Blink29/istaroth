@@ -34,6 +34,7 @@ benchmarks/              Benchmark runner and plotting scripts
 docs/PROJECT_PLAN.md     Implementation and evaluation plan
 results/                 CSV outputs from benchmark runs
 plots/                   Generated figures
+report/                  Final ASME report source, class file, and PDF
 ```
 
 ## Build
@@ -48,6 +49,22 @@ Requirements:
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+```
+
+## Final Report
+
+The final report is in `report/`:
+
+- `report/report.tex`: ASME-format LaTeX source
+- `report/asme2e.cls`: ASME class file needed to compile the report
+- `report/report.pdf`: compiled final report
+
+The report references figures from the root `plots/` directory, so compile it from inside `report/`:
+
+```bash
+cd report
+pdflatex -interaction=nonstopmode report.tex
+pdflatex -interaction=nonstopmode report.tex
 ```
 
 ## Run the tools
